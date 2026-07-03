@@ -1,0 +1,34 @@
+[project]
+name = "have-agent"
+version = "0.1.0"
+description = "Control plane for muroc-aero: task substrate, scheduler, and worker protocol"
+requires-python = ">=3.12"
+dependencies = [
+    "pyyaml>=6",
+]
+
+[project.scripts]
+have = "have_agent.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/have_agent"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

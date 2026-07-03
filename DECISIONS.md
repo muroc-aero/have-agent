@@ -128,3 +128,14 @@ Values embed with `.` -> `p`, `-` -> `m`.
 published (with the `report.published` event), while the study is still
 `running` — conclusion_ref is an artifact pointer, not state, and the human
 review that follows needs the briefing in hand.
+
+## 16. HangarExecutor param binding (sweep keys are not plan paths)
+
+§5 sweep keys are domain parameter names (`battery.specific_energy_whkg`),
+but the-hangar's `run_plan(overrides=...)` takes omd plan-path expressions
+(`components[mission].config.mission_range_nm`). The spec defines no
+binding between them, so `HangarExecutor` takes a `param_map` at
+construction (deployment config, like the plan root); unmapped keys pass
+through unchanged, assumed to already be plan paths. If a `bind:` section
+lands in the StudyRequest schema later, DECOMPOSE can bake plan paths into
+the job payloads and the map goes away.

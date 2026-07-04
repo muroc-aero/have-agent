@@ -58,7 +58,7 @@ def build_report(
         (study_id,),
     ).fetchall()
     results = conn.execute(
-        "SELECT j.payload_json, j.run_ref, j.state, v.level FROM job j"
+        "SELECT j.payload_json, j.run_ref, j.state, v.level, v.checks_json FROM job j"
         " LEFT JOIN verdict v ON v.id = j.verdict_id"
         " WHERE j.study_id = ? AND j.type = 'ANALYSIS'"
         " AND j.state IN ('accepted', 'succeeded', 'review') ORDER BY j.created_at",
@@ -86,15 +86,24 @@ def build_report(
         "",
         "## Case results",
         "",
-        "| case | run_ref | state | mtow_kg | fuel_burn_kg | battery_mass_kg |",
-        "|---|---|---|---|---|---|",
+        "| case | run_ref | state | verdict | mtow_kg | fuel_burn_kg | battery_mass_kg |",
+        "|---|---|---|---|---|---|---|",
     ]
     for r in results:
         case = json.loads(r["payload_json"])
-        # canned result lives in the job.succeeded event; keep the table
-        # keyed on run_ref, which is the provenance anchor
+        # physical outputs come from the CHECK verdict's structured
+        # 'outputs' entry (stamped onto the ANALYSIS job at gating)
+        outputs = {}
+        for c in json.loads(r["checks_json"]) if r["checks_json"] else []:
+            if c.get("check") == "outputs":
+                outputs = c.get("outputs") or {}
+        cells = " | ".join(
+            f"{outputs[k]:.1f}" if k in outputs else ""
+            for k in ("mtow_kg", "fuel_burn_kg", "battery_mass_kg")
+        )
         lines.append(
-            f"| {case['case_id']} | {r['run_ref'] or '—'} | {r['state']} | | | |"
+            f"| {case['case_id']} | {r['run_ref'] or '—'} | {r['state']}"
+            f" | {r['level'] or ''} | {cells} |"
         )
     lines += [
         "",

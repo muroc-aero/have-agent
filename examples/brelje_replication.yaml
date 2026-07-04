@@ -1,0 +1,33 @@
+# The canonical workload (spec §5): Brelje 2018a Fig 5 replication.
+# Grid matches the paper and refs/brelje_fig_digitized.csv (11 x 12 = 132
+# min-fuel MDO cases of the King Air C90GT series-hybrid retrofit).
+#
+# Sweep keys are domain parameter names; the worker's --param-map binds
+# them to plan paths (DECISIONS.md #16), for the lane_b plan:
+#   mission.range_nm=components[mission].config.mission_params.mission_range_NM
+#   battery.specific_energy_whkg=components[mission].config.mission_params.battery_specific_energy
+#   battery.specific_energy_whkg=components[mission].config.propulsion_overrides.battery_specific_energy
+study: brelje_replication
+title: Series-hybrid e_batt vs range sweep (Brelje & Martins 2018a Fig 5)
+owner: human:alex
+baseline:
+  template: ocp/brelje_kingair_fuel_mdo.yaml   # resolved against --plan-root
+sweep:
+  battery.specific_energy_whkg: [250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800]
+  mission.range_nm: [300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800]
+outputs: [mtow_kg, fuel_burn_kg, battery_mass_kg, converged]
+acceptance:
+  parity:
+    reference: refs/brelje_fig_digitized.csv
+    metric: is_parity
+    tolerances: {mtow_kg: 0.03, fuel_burn_kg: 0.05}
+  convergence_rate_min: 0.90
+  plausibility_suite: raymer_breguet_v1
+policy:
+  priority: 50
+  compute_budget: {max_wall_hours: 6, workers: any}
+  auto_retry_max: 2
+  retry_strategy: warm_start_nearest_converged
+  auto_accept: {verdict_level: pass}
+  gate_on: [warn, fail]
+  report: study_briefing_v1

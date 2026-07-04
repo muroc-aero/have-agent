@@ -139,3 +139,54 @@ construction (deployment config, like the plan root); unmapped keys pass
 through unchanged, assumed to already be plan paths. If a `bind:` section
 lands in the StudyRequest schema later, DECOMPOSE can bake plan paths into
 the job payloads and the map goes away.
+
+## 17. Single DB adopted (spec §8.3): substrate + PROV tables in one muroc.db
+
+Adopted as recommended. The two schemas have no table-name overlap
+(substrate: study/job/job_dep/worker/verdict/event/schema_migration;
+the-hangar analysis DB: entities/activities/prov_edges/run_cases/run_keys),
+verified live — `have worker run --executor hangar` defaults `--omd-db` to
+the substrate `--db`, so one muroc.db carries jobs, events, verdicts, PROV
+entities, and idempotency keys. Split later only if worker write contention
+shows up, per the spec's revisit clause.
+
+## 18. Acceptance rides in the CHECK payload; no separate acceptance_ref file
+
+Spec §4's CHECK payload example carries an `acceptance_ref:
+acceptance/brelje.yaml`, but §5 defines the acceptance block inline in the
+StudyRequest. DECOMPOSE embeds that block verbatim into each CHECK
+payload_json — one source of truth, no file that can drift from the
+submitted study. Only the parity reference CSV stays a file (it is data,
+resolved against the worker's `--reference-root`).
+
+## 19. Parity tolerance semantics: digitization sigma + flat-ridge fuel
+
+The spec's flat tolerances (`mtow_kg: 0.03, fuel_burn_kg: 0.05`) assume an
+exact reference. The digitized reference is not exact everywhere, and the
+paper's own min-fuel optima sit on flat objective ridges at/above 500 Wh/kg
+(paper Table 4 burns 520 lb at (500 nmi, 500 Wh/kg) where the-hangar's
+reproduction burns 218 lb at <2 % objective difference — both legitimate).
+So `is_parity` (a) widens the effective tolerance to `max(tol, 2*sigma/ref)`
+using the per-cell digitization uncertainty in the reference CSV, and
+(b) honors a per-row `fuel_check` class: strict below 500 Wh/kg, advisory
+(warn, not fail) on the ridge, skip where the reference is near-all-electric.
+MTOW parity is always strict. See refs/README.md.
+
+## 20. omd run_study demoted (spec §8.1): substrate is the study of record
+
+Adopted as recommended: have-agent's substrate is the source of truth for
+studies; the-hangar's study layer remains a local batch executor for
+offline/dev use (its docs already frame `omd-cli study run` that way).
+Nothing to change in have-agent; the formal deprecation notice in
+the-hangar's docs is that repo's own follow-up.
+
+## 21. Analysis-mode solver non-convergence is invisible to assert_convergence
+
+Observed in the live smoke: a Newton solve that fails to converge in an
+analysis-mode run still records `status: completed` with one clean final
+case, so range-safety's `assert_convergence` (run exists / case data /
+no-NaN / objective history) passes it. Optimize-mode runs — every real
+Brelje case — expose driver history and are covered. Fixing analysis-mode
+detection needs the solver residuals surfaced by the-hangar (recording
+level `solver`, or a status from run_plan); flagged for a the-hangar
+follow-up rather than papered over in the check suite.

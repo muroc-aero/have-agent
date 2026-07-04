@@ -103,6 +103,7 @@ def apply_verdict_gates(conn: sqlite3.Connection) -> int:
                 transition, conn, upstream["id"], to, AGENT,
                 {"verdict_id": r["verdict_id"], "level": r["level"]},
                 expected_state="succeeded",
+                verdict_id=r["verdict_id"],
             )
         n += _try(
             transition, conn, r["id"], "accepted", AGENT,

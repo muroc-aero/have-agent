@@ -190,3 +190,47 @@ Brelje case — expose driver history and are covered. Fixing analysis-mode
 detection needs the solver residuals surfaced by the-hangar (recording
 level `solver`, or a status from run_plan); flagged for a the-hangar
 follow-up rather than papered over in the check suite.
+
+## 22. Second parity anchor: upstream openconcept HybridTwin run (planned)
+
+Direction from the user (2026-07-04): the Brelje parity reference should
+also be anchored on running the upstream code, not only on digitizing the
+paper figure. Upstream openconcept ships the paper's own model as
+`openconcept/examples/HybridTwin.py` — the mixed objective
+(fuel_burn + MTOW/100), the full Fig-5 MDO design-variable/constraint set,
+and the range × specific-energy sweep grid are all in the file (driver:
+ScipyOptimizeDriver/SLSQP), so a code-anchored reference is a matter of
+running that sweep and recording outputs.
+
+Plan:
+* Generate `refs/brelje_upstream_openconcept.csv` (same columns as the
+  digitized CSV, `source=upstream-openconcept`) by driving HybridTwin's
+  optimization path from the-hangar's vendored `upstream/openconcept` tree,
+  so versions match what the-hangar itself wraps.
+* Start with the 500-nmi column (4 cells) to cross-validate all three
+  sources at once: paper Table 4 (exact), figure digitization (±sigma),
+  upstream code. Expand toward the full 132-cell grid as compute allows —
+  each cell is a full MDO solve.
+* Repeatability: with the exact solver setup a run should be deterministic
+  per environment; variability enters across environments (BLAS/library
+  versions, dict-order effects a la the PYTHONHASHSEED-flaky the-hangar
+  tests). Probe with K repeats at a few cells (varying PYTHONHASHSEED);
+  if spread is nonzero, record it in the sigma columns so `is_parity`'s
+  existing eff-tol widening applies unchanged. If zero, sigma stays 0 and
+  the reference is exact.
+* `is_parity` needs no code change: acceptance.parity.reference just points
+  at (or merges in) the new CSV. Whether to check against both references
+  or prefer code-anchored cells where available is an open question for
+  when the data exists.
+
+## 23. the-hangar follow-ups: tracking status
+
+Where the bugs found-but-not-fixed in the-hangar are recorded for review:
+* Analysis-mode solver non-convergence invisible to assert_convergence
+  (#21 above) — filed as muroc-aero/the-hangar#94.
+* run_study demotion/deprecation notice in docs (#20 above) — filed as
+  muroc-aero/the-hangar#95.
+* Two PYTHONHASHSEED-flaky tests failing intermittently on pristine main
+  (`test_ocp_pyc_prop_slot_multilane`, `test_surrogate_mission_converges`)
+  — NOT yet filed as an issue (noted in comments on the-hangar PRs #92 and
+  #93); needs a the-hangar issue when someone with permissions files it.

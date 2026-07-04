@@ -1,0 +1,18 @@
+# Minimal StudyRequest for trying have-agent with the fake executor
+# (no the-hangar needed). 2 x 2 = 4 ANALYSIS cases + 4 CHECK + 1 REPORT.
+study: quickstart
+title: Quickstart smoke (fake executor)
+baseline:
+  template: ocp/fake_plan.yaml   # never read by the fake executor
+sweep:
+  battery.specific_energy_whkg: [300, 500]
+  mission.range_nm: [400, 600]
+outputs: [mtow_kg, fuel_burn_kg]
+acceptance:
+  plausibility_suite: default_v0
+policy:
+  priority: 50
+  auto_retry_max: 1
+  auto_accept: {verdict_level: pass}
+  gate_on: [warn, fail]
+  report: study_briefing_v1

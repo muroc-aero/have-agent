@@ -234,3 +234,23 @@ Where the bugs found-but-not-fixed in the-hangar are recorded for review:
   (`test_ocp_pyc_prop_slot_multilane`, `test_surrogate_mission_converges`)
   — NOT yet filed as an issue (noted in comments on the-hangar PRs #92 and
   #93); needs a the-hangar issue when someone with permissions files it.
+
+## 24. Template ref's first path segment doubles as the solver capability
+
+Observation from the first real Brelje run: `decompose_study` derives the
+ANALYSIS jobs' `resource.requires` from the template ref's first path
+segment (`solver = plan_ref.split("/", 1)[0]`, spec's capability match in
+§2.3). So `ocp/brelje_kingair_fuel_mdo.yaml` requires solver `ocp` — but
+pointing the template directly at the-hangar's on-disk layout
+(`lane_b/fuel_mdo/plan.yaml`) silently produced `requires: ["lane_b"]`,
+which no worker advertises, and the study sat queued forever.
+
+* Adopted for v0 (no code change): treat `--plan-root` as a *plan store*
+  whose first-level directories are solver tags, and copy/symlink real
+  plans in (README "Real runs" documents the one-time setup). This matches
+  the original template naming and keeps decompose deterministic.
+* Raise for review: the coupling is implicit and the failure mode is
+  silent (workers online, jobs queued, nothing claims). Options worth
+  considering post-v0: an explicit optional `baseline.solver` key
+  (defaulting to the current derivation), and/or a control-tick warning
+  event when queued jobs require a capability no online worker advertises.

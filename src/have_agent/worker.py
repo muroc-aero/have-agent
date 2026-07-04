@@ -15,7 +15,7 @@ from typing import Any
 
 from have_agent.control import control_tick
 from have_agent.db import connect
-from have_agent.executor import Executor, FakeCheckSuite
+from have_agent.executor import CheckSuite, Executor, FakeCheckSuite
 from have_agent.report import build_report
 from have_agent.scheduler import claim_next, heartbeat, lease_expiry
 from have_agent.substrate import record_verdict, register_worker, transition
@@ -29,7 +29,7 @@ class Worker:
         worker_id: str,
         executor: Executor,
         *,
-        check_suite: FakeCheckSuite | None = None,
+        check_suite: CheckSuite | None = None,
         capabilities: dict[str, Any] | None = None,
         capacity: int = 1,
         poll_s: float = 0.05,
@@ -135,10 +135,12 @@ class Worker:
             (job["id"],),
         ).fetchone()
         run_ref = upstream["run_ref"] if upstream else None
-        case_id = (
-            json.loads(upstream["payload_json"]).get("case_id", "?") if upstream else "?"
+        upstream_payload = json.loads(upstream["payload_json"]) if upstream else {}
+        case_id = upstream_payload.get("case_id", "?")
+        level, checks = self.check_suite.run(
+            case_id, run_ref, payload.get("acceptance", {}),
+            overrides=upstream_payload.get("overrides") or {},
         )
-        level, checks = self.check_suite.run(case_id, run_ref, payload.get("acceptance", {}))
         verdict_id = record_verdict(
             conn, job["id"], level, checks, self.worker_id,
             run_ref=run_ref, summary=f"{payload.get('check_suite')}: {level} ({case_id})",

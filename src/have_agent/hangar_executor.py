@@ -31,14 +31,17 @@ class HangarExecutor:
 
     plan_root: directory against which a relative payload plan_ref is
         resolved (e.g. the deployment's plan store checkout).
-    param_map: sweep-key -> plan-path translation for overrides.
+    param_map: sweep-key -> plan-path translation for overrides. A value
+        may be a list when one domain parameter fans out to several plan
+        paths (the Brelje King Air plan binds battery specific energy to
+        both mission_params and propulsion_overrides).
     mode / recording_level / timeout_s / omd_db_path: passed to run_plan.
     """
 
     def __init__(
         self,
         plan_root: str | Path | None = None,
-        param_map: dict[str, str] | None = None,
+        param_map: dict[str, str | list[str]] | None = None,
         *,
         mode: str = "analysis",
         recording_level: str = "driver",
@@ -59,7 +62,12 @@ class HangarExecutor:
         return path
 
     def _translate(self, overrides: dict[str, Any]) -> dict[str, Any]:
-        return {self.param_map.get(k, k): v for k, v in overrides.items()}
+        out: dict[str, Any] = {}
+        for k, v in overrides.items():
+            paths = self.param_map.get(k, k)
+            for path in [paths] if isinstance(paths, str) else paths:
+                out[path] = v
+        return out
 
     def execute(
         self, payload: dict[str, Any], *, study_id: str, job_id: str, attempt: int

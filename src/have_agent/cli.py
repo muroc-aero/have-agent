@@ -175,23 +175,53 @@ def cmd_events(conn, args) -> int:
 
 def cmd_worker_run(conn, args) -> int:
     conn.close()  # the worker owns its own connection
-    fail_attempts = {}
-    for spec in args.fail_case or ():
-        case, _, n = spec.partition(":")
-        fail_attempts[case] = int(n or 1)
-    check_levels = {}
-    for spec in args.check_level or ():
-        case, _, level = spec.partition(":")
-        check_levels[case] = level or "warn"
-    worker = Worker(
-        args.db,
-        args.id,
-        FakeOCPExecutor(
+    if args.executor == "hangar":
+        from have_agent.checks import RangeSafetyCheckSuite
+        from have_agent.hangar_executor import HangarExecutor
+
+        param_map: dict = {}
+        for spec in args.param_map or ():
+            key, _, path = spec.partition("=")
+            existing = param_map.get(key)
+            if existing is None:
+                param_map[key] = path
+            elif isinstance(existing, list):
+                existing.append(path)
+            else:
+                param_map[key] = [existing, path]
+        # unified DB (spec §8.3): the-hangar's PROV tables live in the same
+        # muroc.db as the substrate unless --omd-db points elsewhere
+        omd_db = args.omd_db or args.db
+        executor = HangarExecutor(
+            plan_root=args.plan_root,
+            param_map=param_map,
+            mode=args.mode,
+            timeout_s=args.timeout,
+            omd_db_path=omd_db,
+        )
+        check_suite = RangeSafetyCheckSuite(
+            reference_root=args.reference_root, db_path=omd_db,
+        )
+    else:
+        fail_attempts = {}
+        for spec in args.fail_case or ():
+            case, _, n = spec.partition(":")
+            fail_attempts[case] = int(n or 1)
+        check_levels = {}
+        for spec in args.check_level or ():
+            case, _, level = spec.partition(":")
+            check_levels[case] = level or "warn"
+        executor = FakeOCPExecutor(
             runtime_s=args.runtime,
             fail_attempts=fail_attempts,
             permanent_fail=set(args.permanent_fail or ()),
-        ),
-        check_suite=FakeCheckSuite(levels=check_levels),
+        )
+        check_suite = FakeCheckSuite(levels=check_levels)
+    worker = Worker(
+        args.db,
+        args.id,
+        executor,
+        check_suite=check_suite,
         capabilities={"solvers": args.solvers.split(","), "mem_mb": args.mem},
         capacity=args.capacity,
         poll_s=args.poll,
@@ -267,15 +297,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     w = sub.add_parser("worker", help="worker commands")
     wsub = w.add_subparsers(dest="worker_command", required=True)
-    s = wsub.add_parser("run", help="start a pull worker loop (fake executor for now)")
+    s = wsub.add_parser("run", help="start a pull worker loop")
     s.add_argument("--id", required=True, help="e.g. worker:vps-1")
+    s.add_argument("--executor", choices=("fake", "hangar"), default="fake",
+                   help="hangar = real the-hangar run_plan + range-safety checks")
     s.add_argument("--capacity", type=int, default=1)
     s.add_argument("--solvers", default="ocp")
     s.add_argument("--mem", type=int, default=8192)
     s.add_argument("--poll", type=float, default=0.5)
-    s.add_argument("--runtime", type=float, default=1.0, help="fake seconds per case")
     s.add_argument("--idle-exit", type=int, default=None,
                    help="exit after N idle polls (default: run forever)")
+    # hangar executor options
+    s.add_argument("--plan-root", help="directory resolving relative plan_refs")
+    s.add_argument("--param-map", action="append", metavar="SWEEP_KEY=PLAN_PATH",
+                   help="override translation, e.g. mission.range_nm=design_range.value")
+    s.add_argument("--reference-root", help="directory resolving acceptance parity refs"
+                   " (default: cwd)")
+    s.add_argument("--omd-db", help="the-hangar analysis DB (default: --db, unified)")
+    s.add_argument("--mode", choices=("analysis", "optimize"), default="optimize")
+    s.add_argument("--timeout", type=int, default=None, help="per-run wallclock seconds")
+    # fake executor options
+    s.add_argument("--runtime", type=float, default=1.0, help="fake seconds per case")
     s.add_argument("--fail-case", action="append", metavar="CASE[:N]",
                    help="inject failure: case fails while attempt <= N")
     s.add_argument("--permanent-fail", action="append", metavar="CASE")

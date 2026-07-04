@@ -27,6 +27,17 @@ class Executor(Protocol):
     ) -> ExecResult: ...
 
 
+class CheckSuite(Protocol):
+    def run(
+        self,
+        case_id: str,
+        run_ref: str | None,
+        acceptance: dict[str, Any],
+        *,
+        overrides: dict[str, Any] | None = None,
+    ) -> tuple[str, list[dict[str, Any]]]: ...
+
+
 class FakeOCPExecutor:
     """Fakes an OCP case: sleep + canned result + injectable failure.
 
@@ -87,7 +98,12 @@ class FakeCheckSuite:
         self.default = default
 
     def run(
-        self, case_id: str, run_ref: str | None, acceptance: dict[str, Any]
+        self,
+        case_id: str,
+        run_ref: str | None,
+        acceptance: dict[str, Any],
+        *,
+        overrides: dict[str, Any] | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         if run_ref is None:
             return "error", [

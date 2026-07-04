@@ -222,3 +222,5 @@ muroc.db*
 artifacts/
 # written under the CWD by the-hangar's run_plan during real worker runs
 hangar_data/
+# local plan-store (copies of the-hangar plans; see README "Real runs")
+plan-store/

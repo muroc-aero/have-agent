@@ -89,20 +89,30 @@ Requirements:
 - a the-hangar checkout, set up per its README (vendored `upstream/` trees,
   `git submodule update --init`, `uv sync --all-packages`)
 - the-hangar at or after PR #93 (idempotency keys silently land in the wrong
-  DB file before it)
+  DB file before it), plus PR #96 for the Brelje lane_b plan itself
+
+One-time plan-store setup: `baseline.template` refs are
+`<solver>/<name>.yaml` — the first segment doubles as the solver capability
+the jobs will require (workers advertise theirs via `--solvers`, default
+`ocp`). Populate a plan-store directory accordingly:
+
+```sh
+HANGAR=/path/to/the-hangar
+mkdir -p plan-store/ocp
+cp $HANGAR/packages/omd/demos/brelje_2018a/lane_b/fuel_mdo/plan.yaml \
+   plan-store/ocp/brelje_kingair_fuel_mdo.yaml
+```
 
 The worker must run in an environment where both packages import; the
 simplest way is uv's overlay:
 
 ```sh
-HANGAR=/path/to/the-hangar
-
 uv run have --db muroc.db submit examples/brelje_replication.yaml
 uv run have --db muroc.db approve <study_id>
 
 uv run --project $HANGAR --with /path/to/have-agent \
   have --db muroc.db worker run --id worker:hangar-1 --executor hangar \
-  --plan-root $HANGAR/packages/omd/demos/brelje_2018a \
+  --plan-root ./plan-store \
   --param-map 'mission.range_nm=components[mission].config.mission_params.mission_range_NM' \
   --param-map 'battery.specific_energy_whkg=components[mission].config.mission_params.battery_specific_energy' \
   --param-map 'battery.specific_energy_whkg=components[mission].config.propulsion_overrides.battery_specific_energy' \
@@ -112,8 +122,8 @@ uv run --project $HANGAR --with /path/to/have-agent \
 
 The pieces:
 
-- `--plan-root` resolves the StudyRequest's `baseline.template` (a the-hangar
-  plan ref) to a plan file.
+- `--plan-root` resolves the StudyRequest's `baseline.template` (a plan-store
+  ref) to a plan file.
 - `--param-map SWEEP_KEY=PLAN_PATH` (repeatable) binds domain sweep keys to
   plan parameter paths (DECISIONS #16); repeating a key fans one sweep value
   out to several plan paths. The bindings above match

@@ -29,16 +29,55 @@ def _last_failure_payload(conn: sqlite3.Connection, job_id: str) -> dict[str, An
     return json.loads(row["payload_json"]) if row else {}
 
 
-def _nearest_converged_run(conn: sqlite3.Connection, study_id: str) -> str | None:
-    """Stub for retry_strategy=warm_start_nearest_converged: most recently
-    finished converged sibling (nearest-in-sweep comes with the real hangar)."""
-    row = conn.execute(
-        "SELECT run_ref FROM job WHERE study_id = ? AND type = 'ANALYSIS'"
-        " AND state IN ('succeeded', 'accepted') AND run_ref IS NOT NULL"
-        " ORDER BY state_updated_at DESC LIMIT 1",
+def _numeric(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _nearest_converged_run(
+    conn: sqlite3.Connection, study_id: str, overrides: dict[str, Any]
+) -> tuple[str | None, str | None]:
+    """retry_strategy=warm_start_nearest_converged: the converged sibling
+    nearest to `overrides` in sweep coordinates. Numeric axes are normalized
+    by their span across the candidates (so e.g. Wh/kg and nmi weigh
+    equally); a key that is non-numeric or missing on either side costs 1
+    when the values differ. Ties break on case_id, so the pick is
+    deterministic and replayable. Returns (run_ref, case_id) or (None, None);
+    the-hangar cold-starts on a miss either way."""
+    rows = conn.execute(
+        "SELECT run_ref, payload_json FROM job WHERE study_id = ? AND type = 'ANALYSIS'"
+        " AND state IN ('succeeded', 'accepted') AND run_ref IS NOT NULL",
         (study_id,),
-    ).fetchone()
-    return row["run_ref"] if row else None
+    ).fetchall()
+    candidates = []
+    for row in rows:
+        payload = json.loads(row["payload_json"])
+        candidates.append(
+            (row["run_ref"], payload.get("case_id", "?"), payload.get("overrides") or {})
+        )
+    if not candidates:
+        return None, None
+
+    target = overrides or {}
+    keys = sorted({k for _, _, sib in candidates for k in sib} | set(target))
+    spans: dict[str, float] = {}
+    for k in keys:
+        vals = [sib[k] for _, _, sib in candidates if _numeric(sib.get(k))]
+        if _numeric(target.get(k)):
+            vals.append(target[k])
+        spans[k] = float(max(vals) - min(vals)) if vals else 0.0
+
+    def distance(sib: dict[str, Any]) -> float:
+        d = 0.0
+        for k in keys:
+            a, b = target.get(k), sib.get(k)
+            if _numeric(a) and _numeric(b):
+                d += ((a - b) / spans[k]) ** 2 if spans[k] else 0.0
+            elif a != b:
+                d += 1.0
+        return d
+
+    run_ref, case_id, _ = min(candidates, key=lambda c: (distance(c[2]), c[1]))
+    return run_ref, case_id
 
 
 def run_triage(conn: sqlite3.Connection, triage_job: sqlite3.Row) -> dict[str, Any]:
@@ -69,7 +108,12 @@ def run_triage(conn: sqlite3.Connection, triage_job: sqlite3.Row) -> dict[str, A
         auto = retry_number <= int(policy.get("auto_retry_max", 0))
         parent_payload = json.loads(parent["payload_json"])
         if policy.get("retry_strategy") == "warm_start_nearest_converged":
-            parent_payload["warm_start_run"] = _nearest_converged_run(conn, parent["study_id"])
+            warm_ref, warm_case = _nearest_converged_run(
+                conn, parent["study_id"], parent_payload.get("overrides") or {}
+            )
+            parent_payload["warm_start_run"] = warm_ref
+            if warm_ref:
+                result.update({"warm_start_run": warm_ref, "warm_start_case": warm_case})
         retry_id = create_job(
             conn, parent["study_id"], parent["type"],
             payload=parent_payload,

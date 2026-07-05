@@ -4,7 +4,13 @@ import json
 
 import pytest
 
-from have_agent.decompose import case_matrix, parse_study_request, short_names, submit_study
+from have_agent.decompose import (
+    build_cases,
+    case_matrix,
+    parse_study_request,
+    short_names,
+    submit_study,
+)
 from tests.conftest import study_row
 
 BRELJE_YAML = """\
@@ -66,6 +72,100 @@ def test_case_matrix_brelje():
 def test_parse_rejects_incomplete_request():
     with pytest.raises(ValueError, match="sweep"):
         parse_study_request("study: x\nbaseline: {template: t}\n")
+
+
+# bind: baked plan-path overrides + cases: explicit case list (DECISIONS #26/#27)
+
+BIND_CASES_YAML = """\
+study: bind_cases
+owner: human:alex
+baseline:
+  template: ocp/kingair.yaml
+bind:
+  mission.range_nm: components[mission].config.mission_params.mission_range_NM
+  battery.specific_energy_whkg:
+    - components[mission].config.mission_params.battery_specific_energy
+    - components[mission].config.propulsion_overrides.battery_specific_energy
+sweep:
+  battery.specific_energy_whkg: [400, 500]
+  mission.range_nm: [500, 700]
+cases:
+  - overrides: {battery.specific_energy_whkg: 475, mission.range_nm: 625}
+  - case_id: probe_high
+    overrides: {battery.specific_energy_whkg: 800, mission.range_nm: 1000}
+"""
+
+
+def test_parse_accepts_cases_without_sweep():
+    spec = parse_study_request(
+        "study: x\nbaseline: {template: ocp/t}\n"
+        "cases:\n  - overrides: {a.b_nm: 1}\n"
+    )
+    assert build_cases(spec) == [{"case_id": "b1", "overrides": {"a.b_nm": 1}}]
+
+
+@pytest.mark.parametrize(("snippet", "match"), [
+    ("bind: [not, a, map]\nsweep: {a: [1]}\n", "bind"),
+    ("bind: {k: []}\nsweep: {a: [1]}\n", "bind"),
+    ("cases: {not: a-list}\n", "cases"),
+    ("cases:\n  - {case_id: x}\n", "overrides"),
+    ("cases:\n  - {case_id: '', overrides: {a: 1}}\n", "case_id"),
+])
+def test_parse_rejects_malformed_bind_and_cases(snippet, match):
+    with pytest.raises(ValueError, match=match):
+        parse_study_request(f"study: x\nbaseline: {{template: t}}\n{snippet}")
+
+
+def test_build_cases_appends_explicit_after_sweep():
+    spec = parse_study_request(BIND_CASES_YAML)
+    cases = build_cases(spec)
+    assert [c["case_id"] for c in cases] == [
+        "e400_r500", "e400_r700", "e500_r500", "e500_r700",  # sweep row-major
+        "e475_r625",     # derived id, same scheme as sweep cases
+        "probe_high",    # explicit id kept verbatim
+    ]
+
+
+def test_build_cases_rejects_duplicate_ids():
+    spec = parse_study_request(
+        BIND_CASES_YAML + "  - overrides: {battery.specific_energy_whkg: 400,"
+                          " mission.range_nm: 500}\n"
+    )
+    with pytest.raises(ValueError, match="duplicate case_id.*e400_r500"):
+        build_cases(spec)
+
+
+def test_submit_bakes_bound_plan_overrides(conn):
+    study_id, plan = submit_study(conn, BIND_CASES_YAML, "human:alex")
+    assert plan["case_sources"] == {"sweep": 4, "explicit": 2}
+    assert plan["bound"] is True
+    payloads = [
+        json.loads(r["payload_json"]) for r in conn.execute(
+            "SELECT payload_json FROM job WHERE study_id = ? AND type = 'ANALYSIS'"
+            " ORDER BY created_at",
+            (study_id,),
+        ).fetchall()
+    ]
+    first = payloads[0]
+    # domain-keyed overrides stay for parity lookups / case identity ...
+    assert first["overrides"] == {
+        "battery.specific_energy_whkg": 400, "mission.range_nm": 500,
+    }
+    # ... and the plan-path translation rides alongside, fan-out included
+    assert first["plan_overrides"] == {
+        "components[mission].config.mission_params.battery_specific_energy": 400,
+        "components[mission].config.propulsion_overrides.battery_specific_energy": 400,
+        "components[mission].config.mission_params.mission_range_NM": 500,
+    }
+    assert all("plan_overrides" in p for p in payloads)
+
+
+def test_submit_without_bind_bakes_no_plan_overrides(conn):
+    _, _ = submit_study(conn, BRELJE_YAML, "human:alex")
+    payload = json.loads(conn.execute(
+        "SELECT payload_json FROM job WHERE type = 'ANALYSIS' LIMIT 1"
+    ).fetchone()["payload_json"])
+    assert "plan_overrides" not in payload  # --param-map path still applies
 
 
 def test_submit_study_creates_jobs_and_proposes(conn):

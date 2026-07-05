@@ -1,12 +1,6 @@
 # The canonical workload (spec §5): Brelje 2018a Fig 5 replication.
 # Grid matches the paper and refs/brelje_fig_digitized.csv (11 x 12 = 132
 # min-fuel MDO cases of the King Air C90GT series-hybrid retrofit).
-#
-# Sweep keys are domain parameter names; the worker's --param-map binds
-# them to plan paths (DECISIONS.md #16), for the lane_b plan:
-#   mission.range_nm=components[mission].config.mission_params.mission_range_NM
-#   battery.specific_energy_whkg=components[mission].config.mission_params.battery_specific_energy
-#   battery.specific_energy_whkg=components[mission].config.propulsion_overrides.battery_specific_energy
 study: brelje_replication
 title: Series-hybrid e_batt vs range sweep (Brelje & Martins 2018a Fig 5)
 owner: human:alex
@@ -16,6 +10,15 @@ baseline:
   # match the workers' --solvers. See README "Real runs" for the one-time
   # plan-store setup (copies the-hangar's lane_b/fuel_mdo/plan.yaml here).
   template: ocp/brelje_kingair_fuel_mdo.yaml
+# Sweep keys are domain parameter names; bind: maps them to plan paths for
+# the lane_b plan (DECISIONS.md #26). DECOMPOSE bakes the translation into
+# each job payload, so workers need no --param-map flags. A key may fan out
+# to several plan paths (list value).
+bind:
+  mission.range_nm: components[mission].config.mission_params.mission_range_NM
+  battery.specific_energy_whkg:
+    - components[mission].config.mission_params.battery_specific_energy
+    - components[mission].config.propulsion_overrides.battery_specific_energy
 sweep:
   battery.specific_energy_whkg: [250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800]
   mission.range_nm: [300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800]

@@ -277,3 +277,46 @@ Two related findings from the first real 132-case run:
   decompose should size est_runtime_s from the workload (e.g. an optional
   StudyRequest field, or clamp lease to >= the worker's --timeout);
   invariant worth enforcing: lease_duration > executor timeout.
+
+## 26. StudyRequest `bind:` section (schema addition, user-directed 2026-07-05)
+
+The §5 schema left sweep-key -> plan-path binding undefined; v0 pushed it
+to the worker-side `--param-map` flags (#16), which made every deployment
+repeat the study's binding out-of-band. Adopted the forward path #16
+anticipated: an optional top-level `bind:` mapping
+(`domain_key: plan_path | [plan_paths]`, list = fan-out to several paths).
+DECOMPOSE translates each case's overrides and bakes the result into the
+ANALYSIS payload as `plan_overrides`; the domain-keyed `overrides` field is
+unchanged, because CHECK parity lookups and case identity key on it.
+`HangarExecutor` prefers `plan_overrides` when present and falls back to
+`param_map` otherwise, so existing studies and deployments are unaffected.
+The binding now travels with the study (versioned in intent_yaml) instead
+of living in shell history.
+
+## 27. StudyRequest `cases:` list (schema addition, user-directed 2026-07-05)
+
+§5 only defined factorial `sweep:` expansion. Added an optional top-level
+`cases:` list ({`overrides`, optional `case_id`}); explicit cases append
+after the sweep matrix in YAML order, ids are derived with the same
+short-name scheme when omitted, and duplicate case_ids reject at parse
+time. A study must have a `sweep:` and/or a `cases:` list. This unblocks
+non-factorial studies (probes, DOE samples, boundary refinement) without
+touching decompose's determinism; DOE *generators* (LHS etc.) remain a
+possible later layer that would emit an explicit case list.
+
+## 28. Warm-start retries implemented (spec §4/§5 completion)
+
+`retry_strategy: warm_start_nearest_converged` was schema-only: triage
+seeded `warm_start_run` from the *most recently finished* converged
+sibling (a stub), and the first Brelje run wrote off 4 boundary cells
+(e400_r650, e450_r650, e450_r700, e550_r800) that the original pipeline
+recovered with neighbor warm starts. Now implemented as nearest-in-sweep:
+distance over the union of override keys, numeric axes span-normalized
+across candidates (Wh/kg and nmi weigh equally), non-numeric/missing keys
+cost 1 on mismatch, ties break on case_id so the pick is deterministic and
+replayable. The chosen run/case are recorded on the retry's
+`decision.logged` event. the-hangar's `run_plan` already consumed
+`warm_start_run` (seeds DV initials from the run's final case, best-effort
+cold start on miss), so no the-hangar change was needed. Candidate pool is
+converged siblings within the same study; cross-study warm starts are out
+of scope (idempotency and provenance are study-scoped).

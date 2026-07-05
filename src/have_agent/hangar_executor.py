@@ -10,8 +10,11 @@ the-hangar is imported lazily at execute() time: have-agent itself has no
 dependency on it, and tests stub the module (see tests/test_hangar_executor).
 
 The StudyRequest sweep keys are domain parameter names (e.g.
-``battery.specific_energy_whkg``), not omd plan paths; ``param_map``
-translates them (DECISIONS.md #16). Unmapped keys are passed through
+``battery.specific_energy_whkg``), not omd plan paths. A study with a
+``bind:`` section arrives pre-translated: DECOMPOSE bakes the plan-path
+overrides into the payload as ``plan_overrides``, which wins here. For
+studies without one, ``param_map`` translates the domain-keyed
+``overrides`` (DECISIONS.md #16). Unmapped keys are passed through
 unchanged, assumed to already be plan-path expressions.
 """
 
@@ -74,13 +77,16 @@ class HangarExecutor:
     ) -> ExecResult:
         from hangar.omd.run import run_plan  # requires the-hangar installed
 
+        overrides = payload.get("plan_overrides")
+        if overrides is None:
+            overrides = self._translate(payload.get("overrides") or {})
         result = run_plan(
             self._resolve_plan(payload["plan_ref"]),
             mode=self.mode,
             recording_level=self.recording_level,
             db_path=self.omd_db_path,
             timeout_seconds=self.timeout_s,
-            overrides=self._translate(payload.get("overrides") or {}),
+            overrides=overrides,
             case_id=payload["case_id"],
             study_id=study_id,
             attempt=attempt,

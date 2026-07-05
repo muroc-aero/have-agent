@@ -113,9 +113,6 @@ uv run have --db muroc.db approve <study_id>
 uv run --project $HANGAR --with /path/to/have-agent \
   have --db muroc.db worker run --id worker:hangar-1 --executor hangar \
   --plan-root ./plan-store \
-  --param-map 'mission.range_nm=components[mission].config.mission_params.mission_range_NM' \
-  --param-map 'battery.specific_energy_whkg=components[mission].config.mission_params.battery_specific_energy' \
-  --param-map 'battery.specific_energy_whkg=components[mission].config.propulsion_overrides.battery_specific_energy' \
   --reference-root /path/to/have-agent \
   --mode optimize --timeout 3600
 ```
@@ -124,10 +121,12 @@ The pieces:
 
 - `--plan-root` resolves the StudyRequest's `baseline.template` (a plan-store
   ref) to a plan file.
-- `--param-map SWEEP_KEY=PLAN_PATH` (repeatable) binds domain sweep keys to
-  plan parameter paths (DECISIONS #16); repeating a key fans one sweep value
-  out to several plan paths. The bindings above match
-  `examples/brelje_replication.yaml` (they are also in its header comment).
+- The StudyRequest's `bind:` section maps domain sweep keys to plan parameter
+  paths (a key may fan out to several paths); DECOMPOSE bakes the translation
+  into each job payload, so it travels with the study and workers need no
+  per-deployment flags. For studies without a `bind:`, the worker-side
+  `--param-map SWEEP_KEY=PLAN_PATH` (repeatable) still applies as the
+  fallback (DECISIONS #16, #26).
 - `--reference-root` resolves `acceptance.parity.reference`
   (`refs/brelje_fig_digitized.csv`) — point it at this repo.
 - `--omd-db` only if the-hangar's tables live in a separate file; by default
@@ -136,6 +135,13 @@ The pieces:
 Note: uv caches the `--with` build of have-agent by project metadata, not
 source contents — if you edit have-agent between worker launches, add
 `--reinstall-package have-agent` so the workers pick up the change.
+
+With `policy.retry_strategy: warm_start_nearest_converged`, TRIAGE seeds
+each retry from the converged sibling nearest in sweep coordinates
+(`warm_start_run` in the retry payload; the-hangar seeds the plan's DV
+initials from that run's final case, cold-starting on a miss). The pick is
+logged on the `decision.logged` event. This is how boundary cells that
+diverge from cold starts get recovered.
 
 Case verdicts fold worst-of: convergence (range-safety assertions), parity
 (outputs vs the reference cell at the case's sweep coordinates, tolerances
@@ -189,6 +195,6 @@ examples/                    quickstart.yaml, brelje_replication.yaml
 ## Development
 
 ```sh
-uv run pytest -q        # 419 tests, all stdlib/SQLite, no the-hangar needed
+uv run pytest -q        # 434 tests, all stdlib/SQLite, no the-hangar needed
 uv run ruff check .
 ```

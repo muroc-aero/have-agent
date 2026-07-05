@@ -190,3 +190,90 @@ Brelje case — expose driver history and are covered. Fixing analysis-mode
 detection needs the solver residuals surfaced by the-hangar (recording
 level `solver`, or a status from run_plan); flagged for a the-hangar
 follow-up rather than papered over in the check suite.
+
+## 22. Second parity anchor: upstream openconcept HybridTwin run (planned)
+
+Direction from the user (2026-07-04): the Brelje parity reference should
+also be anchored on running the upstream code, not only on digitizing the
+paper figure. Upstream openconcept ships the paper's own model as
+`openconcept/examples/HybridTwin.py` — the mixed objective
+(fuel_burn + MTOW/100), the full Fig-5 MDO design-variable/constraint set,
+and the range × specific-energy sweep grid are all in the file (driver:
+ScipyOptimizeDriver/SLSQP), so a code-anchored reference is a matter of
+running that sweep and recording outputs.
+
+Plan:
+* Generate `refs/brelje_upstream_openconcept.csv` (same columns as the
+  digitized CSV, `source=upstream-openconcept`) by driving HybridTwin's
+  optimization path from the-hangar's vendored `upstream/openconcept` tree,
+  so versions match what the-hangar itself wraps.
+* Start with the 500-nmi column (4 cells) to cross-validate all three
+  sources at once: paper Table 4 (exact), figure digitization (±sigma),
+  upstream code. Expand toward the full 132-cell grid as compute allows —
+  each cell is a full MDO solve.
+* Repeatability: with the exact solver setup a run should be deterministic
+  per environment; variability enters across environments (BLAS/library
+  versions, dict-order effects a la the PYTHONHASHSEED-flaky the-hangar
+  tests). Probe with K repeats at a few cells (varying PYTHONHASHSEED);
+  if spread is nonzero, record it in the sigma columns so `is_parity`'s
+  existing eff-tol widening applies unchanged. If zero, sigma stays 0 and
+  the reference is exact.
+* `is_parity` needs no code change: acceptance.parity.reference just points
+  at (or merges in) the new CSV. Whether to check against both references
+  or prefer code-anchored cells where available is an open question for
+  when the data exists.
+
+## 23. the-hangar follow-ups: tracking status
+
+Where the bugs found-but-not-fixed in the-hangar are recorded for review:
+* Analysis-mode solver non-convergence invisible to assert_convergence
+  (#21 above) — filed as muroc-aero/the-hangar#94.
+* run_study demotion/deprecation notice in docs (#20 above) — filed as
+  muroc-aero/the-hangar#95.
+* Two PYTHONHASHSEED-flaky tests failing intermittently on pristine main
+  (`test_ocp_pyc_prop_slot_multilane`, `test_surrogate_mission_converges`)
+  — NOT yet filed as an issue (noted in comments on the-hangar PRs #92 and
+  #93); needs a the-hangar issue when someone with permissions files it.
+
+## 24. Template ref's first path segment doubles as the solver capability
+
+Observation from the first real Brelje run: `decompose_study` derives the
+ANALYSIS jobs' `resource.requires` from the template ref's first path
+segment (`solver = plan_ref.split("/", 1)[0]`, spec's capability match in
+§2.3). So `ocp/brelje_kingair_fuel_mdo.yaml` requires solver `ocp` — but
+pointing the template directly at the-hangar's on-disk layout
+(`lane_b/fuel_mdo/plan.yaml`) silently produced `requires: ["lane_b"]`,
+which no worker advertises, and the study sat queued forever.
+
+* Adopted for v0 (no code change): treat `--plan-root` as a *plan store*
+  whose first-level directories are solver tags, and copy/symlink real
+  plans in (README "Real runs" documents the one-time setup). This matches
+  the original template naming and keeps decompose deterministic.
+* Raise for review: the coupling is implicit and the failure mode is
+  silent (workers online, jobs queued, nothing claims). Options worth
+  considering post-v0: an explicit optional `baseline.solver` key
+  (defaulting to the current derivation), and/or a control-tick warning
+  event when queued jobs require a capability no online worker advertises.
+
+## 25. Lease sizing vs real MDO runtimes (first Brelje run findings)
+
+Two related findings from the first real 132-case run:
+
+* Worker crash on a reaped lease (fixed): a hard cell ran ~24 min; the
+  lease (2 x est_runtime_s=240, min 600 s => 10 min) expired mid-solve and
+  the reaper requeued the job. When the solve returned, the worker's stale
+  `running -> failed` transition raised StaleState, which propagated out of
+  `Worker._process` and killed the loop. Adopted: `_process` now treats
+  StaleState as "the reaper took the job — drop the obsolete result and
+  keep polling" (stats key `lost_lease`; regression tests in
+  tests/test_worker.py).
+* est_runtime_s is hardcoded to 240 in decompose (spec's 2x-est lease,
+  min 10 min). Real Brelje MDO cells run 40 s to 25+ min (worker
+  --timeout 3600), so slow cells are guaranteed to outlive their lease,
+  get double-executed (idempotency replay only covers the same attempt),
+  and burn max_attempts on reap requeues. One-time intervention for the
+  running study: patched job resource_json est_runtime_s -> 2400 so the
+  lease (4800 s) exceeds the executor timeout (3600 s). Raise for review:
+  decompose should size est_runtime_s from the workload (e.g. an optional
+  StudyRequest field, or clamp lease to >= the worker's --timeout);
+  invariant worth enforcing: lease_duration > executor timeout.

@@ -2,7 +2,7 @@
 name = "have-agent"
 version = "0.1.0"
 description = "Control plane for muroc-aero: task substrate, scheduler, and worker protocol"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6",
 ]

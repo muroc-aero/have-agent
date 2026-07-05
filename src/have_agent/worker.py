@@ -18,7 +18,7 @@ from have_agent.db import connect
 from have_agent.executor import CheckSuite, Executor, FakeCheckSuite
 from have_agent.report import build_report
 from have_agent.scheduler import claim_next, heartbeat, lease_expiry
-from have_agent.substrate import record_verdict, register_worker, transition
+from have_agent.substrate import StaleState, record_verdict, register_worker, transition
 from have_agent.triage import run_triage
 
 
@@ -47,7 +47,7 @@ class Worker:
         self.artifacts_dir = (
             Path(artifacts_dir) if artifacts_dir else self.db_path.parent / "artifacts"
         )
-        self.stats = {"claimed": 0, "succeeded": 0, "failed": 0}
+        self.stats = {"claimed": 0, "succeeded": 0, "failed": 0, "lost_lease": 0}
 
     def run(
         self,
@@ -81,13 +81,13 @@ class Worker:
             conn.close()
 
     def _process(self, conn: sqlite3.Connection, job: sqlite3.Row) -> None:
-        resource = json.loads(job["resource_json"])
-        transition(
-            conn, job["id"], "running", self.worker_id,
-            expected_state="assigned",
-            lease_expires_at=lease_expiry(resource),
-        )
         try:
+            resource = json.loads(job["resource_json"])
+            transition(
+                conn, job["id"], "running", self.worker_id,
+                expected_state="assigned",
+                lease_expires_at=lease_expiry(resource),
+            )
             handler = {
                 "ANALYSIS": self._run_analysis,
                 "CHECK": self._run_check,
@@ -98,13 +98,21 @@ class Worker:
                 raise NotImplementedError(f"job type {job['type']} not implemented in v0")
             ok = handler(conn, job)
             self.stats["succeeded" if ok else "failed"] += 1
+        except StaleState:
+            # The reaper took the job mid-run (lease expired; requeued or
+            # retried elsewhere). The state machine has moved on — our
+            # result is obsolete, so drop it and keep polling.
+            self.stats["lost_lease"] += 1
         except Exception as exc:  # noqa: BLE001 — a crashed handler must not kill the loop
             self.stats["failed"] += 1
-            transition(
-                conn, job["id"], "failed", self.worker_id,
-                {"error": f"{type(exc).__name__}: {exc}", "permanent": False},
-                expected_state="running",
-            )
+            try:
+                transition(
+                    conn, job["id"], "failed", self.worker_id,
+                    {"error": f"{type(exc).__name__}: {exc}", "permanent": False},
+                    expected_state="running",
+                )
+            except StaleState:
+                self.stats["lost_lease"] += 1
 
     def _run_analysis(self, conn: sqlite3.Connection, job: sqlite3.Row) -> bool:
         payload = json.loads(job["payload_json"])

@@ -254,3 +254,26 @@ which no worker advertises, and the study sat queued forever.
   considering post-v0: an explicit optional `baseline.solver` key
   (defaulting to the current derivation), and/or a control-tick warning
   event when queued jobs require a capability no online worker advertises.
+
+## 25. Lease sizing vs real MDO runtimes (first Brelje run findings)
+
+Two related findings from the first real 132-case run:
+
+* Worker crash on a reaped lease (fixed): a hard cell ran ~24 min; the
+  lease (2 x est_runtime_s=240, min 600 s => 10 min) expired mid-solve and
+  the reaper requeued the job. When the solve returned, the worker's stale
+  `running -> failed` transition raised StaleState, which propagated out of
+  `Worker._process` and killed the loop. Adopted: `_process` now treats
+  StaleState as "the reaper took the job — drop the obsolete result and
+  keep polling" (stats key `lost_lease`; regression tests in
+  tests/test_worker.py).
+* est_runtime_s is hardcoded to 240 in decompose (spec's 2x-est lease,
+  min 10 min). Real Brelje MDO cells run 40 s to 25+ min (worker
+  --timeout 3600), so slow cells are guaranteed to outlive their lease,
+  get double-executed (idempotency replay only covers the same attempt),
+  and burn max_attempts on reap requeues. One-time intervention for the
+  running study: patched job resource_json est_runtime_s -> 2400 so the
+  lease (4800 s) exceeds the executor timeout (3600 s). Raise for review:
+  decompose should size est_runtime_s from the workload (e.g. an optional
+  StudyRequest field, or clamp lease to >= the worker's --timeout);
+  invariant worth enforcing: lease_duration > executor timeout.

@@ -133,6 +133,10 @@ The pieces:
 - `--omd-db` only if the-hangar's tables live in a separate file; by default
   the worker unifies on `--db`.
 
+Note: uv caches the `--with` build of have-agent by project metadata, not
+source contents — if you edit have-agent between worker launches, add
+`--reinstall-package have-agent` so the workers pick up the change.
+
 Case verdicts fold worst-of: convergence (range-safety assertions), parity
 (outputs vs the reference cell at the case's sweep coordinates, tolerances
 from the YAML, widened by digitization uncertainty), and plausibility fences

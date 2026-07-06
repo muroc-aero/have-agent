@@ -320,3 +320,87 @@ replayable. The chosen run/case are recorded on the retry's
 cold start on miss), so no the-hangar change was needed. Candidate pool is
 converged siblings within the same study; cross-study warm starts are out
 of scope (idempotency and provenance are study-scoped).
+
+## 29. Cross-study design atlas: the missing read path (proposed, user-requested write-up 2026-07-06)
+
+v0 writes provenance completely but reads it back only as one markdown
+briefing per study. Nothing answers "what do we currently know about this
+vehicle?" across studies: best-known result per design point, the
+feasibility boundary, which conclusions rest on gated-and-accepted
+evidence vs clean passes. The provenance is an archive; queryable views
+are what make it clarify a design.
+
+What already exists on the execution plane (verified 2026-07-06 against
+the live muroc.db): the-hangar's per-run surfaces (`get_results`,
+`get_run_summary`, `generate_plots`, `get_provenance`) work as-is on our
+`run_ref`s, and range-safety's dashboard `view_study` renders a have-agent
+study directly -- `run_plan` stamps `metadata.study = study_id` and names
+the effective plan `{study_id}--{case_id}`, and the dashboard's v1 study
+membership keys on exactly that (`ReadModel(db_path="muroc.db")
+.view_study(<study_id>)` returned all 132 Brelje members with metric
+matrices). Two things it cannot show, by design: (a) the control-plane
+layer -- verdicts, gate outcomes, accept/reject decisions and their
+rationale, retry/triage lineage, warm-start picks -- which lives in
+have-agent's tables that no the-hangar viewer reads; (b) anything
+cross-study, since its study view is a projection of one study id. (Also
+note: omd's `get_study_status`/`get_study_results`/`plot_study` do NOT
+work on have-agent studies -- they read a StudyStore state file that only
+the-hangar's own `run_study` creates; have-agent drives `run_plan` per
+case and replaces those with `have status`/`have report`.)
+
+Proposal: a thin read layer, not a new viewer. (1) A stable design-point
+identity: hash of the domain-keyed `overrides` (this is exactly why #26
+kept `overrides` domain-keyed and separate from `plan_overrides`). (2) SQL
+views joining substrate tables (job, verdict, event) with the-hangar's
+results, giving best-known-result-per-design-point with its evidence
+chain. (3) A `have atlas` command / standing artifact rendering the
+current state of knowledge: converged region, feasibility boundary,
+verdict provenance per cell, with `run_ref` links into the existing
+the-hangar/range-safety views for drill-down. Cheap (views + a report
+generator over data already written), and it unlocks cross-study warm
+starts (#28's declared out-of-scope) nearly for free. Read-only: no new
+write surface, no schema change, so it does not touch §0 rules.
+
+## 30. Agent-generated StudyRequests: `have propose` (proposed, user-requested write-up 2026-07-06)
+
+The substrate was built for "agents propose rows; humans approve rows"
+(§0 rule 1), and `proposed` is the safety gate for exactly that -- but v0
+has no agent on the proposing side; the only StudyRequest author is a
+human writing YAML. DECOMPOSE/TRIAGE/REPORT are deterministic policy, not
+judgment (the spec's §0 rule 2 allowance for LLM calls in those three is
+so far unused).
+
+Proposal: `have propose "<design question>"` -- an LLM, given the
+question plus the atlas state (#29), drafts a StudyRequest that is
+submitted normally and lands in `proposed` for human review like any
+other study. Nothing below the YAML changes: the substrate is indifferent
+to who authored `intent_yaml`, DECOMPOSE stays deterministic, and the
+existing plan-proposal review step is the containment. Ordering
+constraint: this lands after #29 -- generation without the read path
+produces studies blind to what is already known; with it, the draft can
+target the actual knowledge gap ("boundary unresolved between e400-e550
+at long range; propose a `cases:` study with warm starts there"). Record
+the prompt/context digest on the study's `decision.logged` event so the
+proposal itself is auditable. Out of scope here: any auto-approval of
+agent-authored studies.
+
+## 31. Successor studies: closing the loop (proposed, user-requested write-up 2026-07-06)
+
+REPORT currently ends a study's story; every follow-up is a human
+noticing something in a briefing and hand-writing the next YAML. The
+first real run produced the canonical example: 4 boundary cells written
+off, whose retry study (`cases:` + warm starts, #27/#28) had to be
+conceived manually.
+
+Proposal: let a closed study propose its successor. Either REPORT gains
+an optional recommendation step, or a human/agent command on a closed
+study (`have follow-up <study_id>`, or #30's propose seeded with the
+study's outcome) emits a new StudyRequest into `proposed` -- refine
+around the feasibility boundary, retry infeasibles warm-started from the
+parent study's converged neighbors, tighten a sweep where parity
+degraded. Successor studies carry a `parent_study` ref in intent so
+lineage is queryable by the atlas. Never auto-approved: the human
+approves each turn of the crank. Combined with #29 and #30 this is the
+full loop -- question -> study -> evidence -> updated atlas -> next
+question -- with humans still touching exactly two states (§0 rule 4
+unchanged).

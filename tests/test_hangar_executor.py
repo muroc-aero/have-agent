@@ -77,6 +77,17 @@ def test_argument_mapping(fake_run_plan):
     }
 
 
+def test_baked_plan_overrides_win_over_param_map(fake_run_plan):
+    # a study with a bind: section arrives pre-translated (DECISIONS #26);
+    # param_map is the fallback for studies without one
+    calls, _ = fake_run_plan
+    ex = HangarExecutor(param_map=PARAM_MAP)
+    baked = {"components[mission].config.mission_params.mission_range_NM": 700}
+    payload = dict(PAYLOAD, plan_overrides=baked)
+    ex.execute(payload, study_id="S1", job_id="J1", attempt=1)
+    assert calls[0]["overrides"] == baked
+
+
 def test_unmapped_override_keys_pass_through(fake_run_plan):
     calls, _ = fake_run_plan
     ex = HangarExecutor()

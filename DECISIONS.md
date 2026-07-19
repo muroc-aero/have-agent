@@ -404,3 +404,29 @@ approves each turn of the crank. Combined with #29 and #30 this is the
 full loop -- question -> study -> evidence -> updated atlas -> next
 question -- with humans still touching exactly two states (§0 rule 4
 unchanged).
+
+## 32. Pluggable worker executors: `--executor pkg.module:factory` (adopted 2026-07-19)
+
+The worker's executor and check suite were a closed two-way choice baked
+into the CLI (`fake` | `hangar`), so any new execution backend meant a
+have-agent patch. The immediate driver is the Lane C eval bridge: sibling
+`hangar-evals` wants to run one eval seed (case x harness x model) per
+ANALYSIS job and fold the graded record into a verdict, and have-agent
+should not have to know that repo exists.
+
+Decision: `--executor` additionally accepts a dotted plugin spec
+`pkg.module:factory`. The loader (`plugins.py`) imports the module and
+calls `factory(args)` with the parsed worker CLI namespace; the factory
+returns `(executor, check_suite)` satisfying the existing protocols in
+`executor.py` (`check_suite` may be None, accepting the worker's
+FakeCheckSuite default). Factory-specific knobs travel via the repeatable
+`--executor-opt KEY=VALUE`, exposed as `args.executor_opts`, so plugins
+need no argparse surface of their own. Malformed specs, import failures,
+wrong-shaped returns, and protocol violations all fail fast with a
+`PluginError` before the worker registers.
+
+Deliberately unchanged: the built-in names keep their hardcoded wiring
+(no registry indirection for the common cases), the Executor/CheckSuite
+protocols are untouched, and the import-path burden stays where the
+hangar executor already put it -- the worker launch environment
+(`uv --project the-hangar --with have-agent --with hangar-evals ...`).

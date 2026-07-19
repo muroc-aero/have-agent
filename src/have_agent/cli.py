@@ -175,6 +175,11 @@ def cmd_events(conn, args) -> int:
 
 def cmd_worker_run(conn, args) -> int:
     conn.close()  # the worker owns its own connection
+    opts: dict = {}
+    for spec in args.executor_opt or ():
+        key, _, value = spec.partition("=")
+        opts[key] = value
+    args.executor_opts = opts
     if args.executor == "hangar":
         from have_agent.checks import RangeSafetyCheckSuite
         from have_agent.hangar_executor import HangarExecutor
@@ -202,6 +207,14 @@ def cmd_worker_run(conn, args) -> int:
         check_suite = RangeSafetyCheckSuite(
             reference_root=args.reference_root, db_path=omd_db,
         )
+    elif args.executor != "fake":
+        from have_agent.plugins import PluginError, load_worker
+
+        try:
+            executor, check_suite = load_worker(args.executor, args)
+        except PluginError as e:
+            print(e, file=sys.stderr)
+            return 1
     else:
         fail_attempts = {}
         for spec in args.fail_case or ():
@@ -299,8 +312,13 @@ def build_parser() -> argparse.ArgumentParser:
     wsub = w.add_subparsers(dest="worker_command", required=True)
     s = wsub.add_parser("run", help="start a pull worker loop")
     s.add_argument("--id", required=True, help="e.g. worker:vps-1")
-    s.add_argument("--executor", choices=("fake", "hangar"), default="fake",
-                   help="hangar = real the-hangar run_plan + range-safety checks")
+    s.add_argument("--executor", default="fake",
+                   help="'fake', 'hangar' (real the-hangar run_plan + range-safety"
+                   " checks), or a plugin spec pkg.module:factory where"
+                   " factory(args) -> (executor, check_suite) (see plugins.py)")
+    s.add_argument("--executor-opt", action="append", metavar="KEY=VALUE",
+                   help="extra options for a plugin factory, exposed as"
+                   " args.executor_opts (repeatable)")
     s.add_argument("--capacity", type=int, default=1)
     s.add_argument("--solvers", default="ocp")
     s.add_argument("--mem", type=int, default=8192)

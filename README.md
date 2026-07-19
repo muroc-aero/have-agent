@@ -169,13 +169,19 @@ column semantics, and the regeneration command are in
 | `have reject <job_id> [--reason ..]` | reject a job in review (or cancel a proposed one) |
 | `have status [study_id]` | job-state rollup per study + worker table |
 | `have events [--object ID] [--follow]` | tail the append-only event log |
-| `have worker run --id worker:NAME ..` | start a pull worker (fake or hangar executor) |
+| `have worker run --id worker:NAME ..` | start a pull worker (fake, hangar, or plugin executor) |
 | `have abort <study_id>` | abort a study, cancel its not-yet-running jobs |
 | `have report <study_id>` | print the published briefing artifact |
 
 `have worker run --help` lists the executor flags (fake: `--runtime`,
 `--fail-case`, `--permanent-fail`, `--check-level`; hangar: `--plan-root`,
 `--param-map`, `--reference-root`, `--omd-db`, `--mode`, `--timeout`).
+`--executor` also accepts a plugin spec `pkg.module:factory` where
+`factory(args) -> (executor, check_suite)` -- a sibling repo ships the
+factory, the worker env supplies the import path (`uv --with`), and
+`--executor-opt KEY=VALUE` (repeatable, exposed as `args.executor_opts`)
+carries factory-specific knobs. See `src/have_agent/plugins.py` and
+DECISIONS #32.
 
 ## Repo layout
 
@@ -186,6 +192,7 @@ src/have_agent/
   substrate.py               tables, transition(), events, verdicts
   decompose.py  scheduler.py  control.py  worker.py   the loop
   executor.py                Executor / CheckSuite protocols + fakes
+  plugins.py                 dotted-path --executor plugin loader
   hangar_executor.py  checks.py                       the-hangar bindings
   report.py  triage.py  cli.py
 refs/                        parity reference data + digitizer
